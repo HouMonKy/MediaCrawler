@@ -8,6 +8,7 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
+
 # 基础配置
 PLATFORM = "xhs"  # 平台，xhs | dy | ks | bili | wb | tieba | zhihu
 KEYWORDS = "编程副业,编程兼职"  # 关键词搜索配置，以英文逗号分隔
@@ -33,6 +34,20 @@ HEADLESS = False
 
 # 是否保存登录状态
 SAVE_LOGIN_STATE = True
+
+# ========== 搜索模式开关 ==========
+# normal  —— 旧分页逻辑
+# timerange —— 启用时间范围逻辑（需同时设置 SEARCH_START_TIME、SEARCH_END_TIME）
+SEARCH_MODE = "normal"
+
+# 时间范围配置
+SEARCH_START_TIME = ""
+SEARCH_END_TIME = ""
+
+# 搜索页间延迟
+PAGE_DELAY = "2.0"
+# 爬取评论延迟
+COMMENT_DELAY = "2.0"
 
 # ==================== CDP (Chrome DevTools Protocol) 配置 ====================
 # 是否启用CDP模式 - 使用用户现有的Chrome/Edge浏览器进行爬取，提供更好的反检测能力
@@ -76,8 +91,8 @@ CRAWLER_MAX_NOTES_COUNT = 200
 # 并发爬虫数量控制
 MAX_CONCURRENCY_NUM = 1
 
-# 是否开启爬媒体模式（包含图片或视频资源），默认不开启爬媒体
-ENABLE_GET_MEIDAS = False
+# 是否开启爬图片模式, 默认不开启爬图片
+ENABLE_GET_IMAGES = False
 
 # 是否开启爬评论模式, 默认开启爬评论
 ENABLE_GET_COMMENTS = True
