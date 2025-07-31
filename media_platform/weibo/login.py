@@ -113,11 +113,50 @@ class WeiboLogin(AbstractLogin):
         pass
 
     async def login_by_cookies(self):
-        utils.logger.info("[WeiboLogin.login_by_qrcode] Begin login weibo by cookie ...")
-        for key, value in utils.convert_str_cookie_to_dict(self.cookie_str).items():
-            await self.browser_context.add_cookies([{
-                'name': key,
-                'value': value,
-                'domain': ".weibo.cn",
-                'path': "/"
-            }])
+        utils.logger.info("[WeiboLogin] Login by cookie ...")
+        for k, v in utils.convert_str_cookie_to_dict(self.cookie_str).items():
+            for domain in [".weibo.cn", ".weibo.com"]:      # ← 写入两个域
+                await self.browser_context.add_cookies(
+                    [{"name": k, "value": v, "domain": domain, "path": "/"}]
+                )
+
+    # ------------------------------------------------------------
+    #  桌面端二维码登录（供 timerange 模式使用）
+    # ------------------------------------------------------------
+    async def login_desktop(self, page: Page):
+        """
+        登录 https://www.weibo.com，成功后返回 (cookie_str, cookie_dict)。
+        如果浏览器已登录，则立即返回而不再扫码。
+        """
+        utils.logger.info("[WeiboLogin] 开始桌面端登录 ...")
+
+        # 先访问一次首页，看看是否已登录
+        await page.goto("https://www.weibo.com")
+        await asyncio.sleep(2)
+        cookie_str, cookie_dict = utils.convert_cookies(
+            await self.browser_context.cookies()
+        )
+        if cookie_dict.get("SUB") and cookie_dict.get("SUBP"):
+            utils.logger.info("[WeiboLogin] 已检测到桌面端登录态，跳过扫码")
+            return cookie_str, cookie_dict
+
+        # 若未登录，则寻找二维码并等待扫码
+        qr_sel = "//canvas[@node-type='qrcode']//img | //img[@alt='二维码']"
+        base64_img = await utils.find_login_qrcode(page, selector=qr_sel)
+        if base64_img:
+            asyncio.get_running_loop().run_in_executor(
+                None, functools.partial(utils.show_qrcode, base64_img)
+            )
+            utils.logger.info("[WeiboLogin] 请扫码登录桌面端 ...")
+
+        # 轮询等待 SUB / SUBP 出现（最多 600 秒）
+        for _ in range(600):
+            cookie_str, cookie_dict = utils.convert_cookies(
+                await self.browser_context.cookies()
+            )
+            if cookie_dict.get("SUB") and cookie_dict.get("SUBP"):
+                utils.logger.info("[WeiboLogin] 桌面端登录成功")
+                return cookie_str, cookie_dict
+            await asyncio.sleep(1)
+
+        raise RuntimeError("桌面端登录超时，请重试")
