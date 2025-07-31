@@ -40,6 +40,22 @@ async def parse_cmd():
                         choices=['csv', 'db', 'json', 'sqlite'], default=config.SAVE_DATA_OPTION)
     parser.add_argument('--cookies', type=str,
                         help='Cookies used for cookie login type / Cookie登录方式使用的Cookie值', default=config.COOKIES)
+    parser.add_argument("--search_mode", type=str,
+                        choices=["normal", "timerange"],
+                        help="搜索模式: normal | timerange",
+                        default=config.SEARCH_MODE)
+    parser.add_argument("--start_time", type=str,
+                        help="起始时间，格式 YYYY-MM-DD 或 YYYY-MM-DD HH",
+                        default="")
+    parser.add_argument("--end_time", type=str,
+                        help="结束时间，格式 YYYY-MM-DD 或 YYYY-MM-DD HH",
+                        default="")
+    parser.add_argument("--page_delay", type=float, 
+                        help="两页搜索之间的休眠秒数",
+                        default=config.PAGE_DELAY,)
+    parser.add_argument("--comment_delay", type=float, 
+                        help="评论接口分页间隔",
+                        default=config.COMMENT_DELAY)
 
     args = parser.parse_args()
 
@@ -53,3 +69,8 @@ async def parse_cmd():
     config.ENABLE_GET_SUB_COMMENTS = args.get_sub_comment
     config.SAVE_DATA_OPTION = args.save_data_option
     config.COOKIES = args.cookies
+    config.SEARCH_MODE = args.search_mode
+    config.START_TIME = args.start_time
+    config.END_TIME = args.end_time
+    config.PAGE_DELAY = args.page_delay
+    config.COMMENT_DELAY = args.comment_delay
