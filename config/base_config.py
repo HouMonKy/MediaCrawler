@@ -11,7 +11,7 @@
 
 # 基础配置
 PLATFORM = "xhs"  # 平台，xhs | dy | ks | bili | wb | tieba | zhihu
-KEYWORDS = "编程副业,编程兼职"  # 关键词搜索配置，以英文逗号分隔
+KEYWORDS = "台风天气,强降雨,高温,山洪,化工爆炸,燃气爆炸,火灾,交通安全,基孔肯雅热,登革热,电信诈骗,校园安全"  # 关键词搜索配置，以英文逗号分隔
 LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
 COOKIES = ""
 CRAWLER_TYPE = (
@@ -44,10 +44,12 @@ SEARCH_MODE = "normal"
 SEARCH_START_TIME = ""
 SEARCH_END_TIME = ""
 
-# 搜索页间延迟
-PAGE_DELAY = "2.0"
-# 爬取评论延迟
-COMMENT_DELAY = "2.0"
+# 搜索页间延迟（支持多种格式：单值 "2" / 数字 2 / 范围字符串 "1-3" 或 "0.5:1.5" / tuple (1,3)）
+# 推荐使用范围字符串或 tuple，以便爬虫在每次翻页时随机化等待，降低被识别风险
+PAGE_DELAY = "1-3"
+
+# 爬取评论分页间隔（同样支持范围或单值）
+COMMENT_DELAY = "0.5-1.5"
 
 # ==================== CDP (Chrome DevTools Protocol) 配置 ====================
 # 是否启用CDP模式 - 使用用户现有的Chrome/Edge浏览器进行爬取，提供更好的反检测能力
