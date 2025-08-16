@@ -50,12 +50,12 @@ async def parse_cmd():
     parser.add_argument("--end_time", type=str,
                         help="结束时间，格式 YYYY-MM-DD 或 YYYY-MM-DD HH",
                         default="")
-    parser.add_argument("--page_delay", type=float, 
-                        help="两页搜索之间的休眠秒数",
-                        default=config.PAGE_DELAY,)
-    parser.add_argument("--comment_delay", type=float, 
-                        help="评论接口分页间隔",
-                        default=config.COMMENT_DELAY)
+    parser.add_argument("--page_delay", type=str,
+                        help='两页搜索之间的休眠秒数。支持：单值（e.g. 2 或 "2.0"），范围字符串（e.g. "1-3" 或 "0.5:1.5"），或 tuple 形式（以字符串传入）',
+                        default=str(config.PAGE_DELAY))
+    parser.add_argument("--comment_delay", type=str,
+                        help='评论接口分页间隔。支持同 page_delay 的格式，程序会在调用时从范围中随机抽取具体数值。',
+                        default=str(config.COMMENT_DELAY))
 
     args = parser.parse_args()
 
