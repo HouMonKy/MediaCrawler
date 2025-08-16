@@ -16,7 +16,14 @@ from collections import Counter
 
 import aiofiles
 import jieba
+
+import os
+os.environ.pop("MPLBACKEND", None)  # 清掉导致冲突的环境变量
+
+import matplotlib
+matplotlib.use("Agg")               # 指定无界面后端，服务器/脚本环境通用
 import matplotlib.pyplot as plt
+
 from wordcloud import WordCloud
 
 import config
