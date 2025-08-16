@@ -8,6 +8,12 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
+import os
+os.environ.pop("MPLBACKEND", None)  # 清掉导致冲突的环境变量
+
+import matplotlib
+matplotlib.use("Agg")               # 指定无界面后端，服务器/脚本环境通用
+import matplotlib.pyplot as plt
 
 import asyncio
 import sys
