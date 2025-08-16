@@ -213,8 +213,10 @@ class WeiboCrawler(AbstractCrawler):
                 if not (self.start_time and self.end_time):
                     utils.logger.error("timerange 模式需同时指定起止时间")
                     return
+                utils.logger.info("[WeiboCrawler.search] 开始以时间范围搜索关键词")
                 await self._search_timerange(kw)
             else:
+                utils.logger.info("[WeiboCrawler.search] 开始以普通模式搜索关键词")
                 await self._search_normal(kw, start_page, limit_per_page, search_type)
 
     # ---------------- normal ----------------
