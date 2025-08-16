@@ -272,54 +272,122 @@ class WeiboCrawler(AbstractCrawler):
 
     async def _crawl_timescope(self, client, kw: str, ts_s: str, ts_e: str):
         """
-        抓取单个 ≤1 小时窗口：
-          - 只要当前页提取到 mid，就继续 page += 1
-          - 连续 2 页空结果即认为到尾
-          - 最多抓 50 页防止死循环
+        抓取单个 ≤1 小时窗口（改进版）：
+          - 首页解析可用总页数，限制上限为 50
+          - 区分：空页（无任何 mid）与“无新 mid”（均为已见）
+          - 连续 2 页空页或连续 3 页无新 mid -> 结束窗口
+          - 对网络异常做有限重试与指数退避
         """
-        page, empty_seq, batch = 1, 0, []
+        page = 1
+        empty_seq = 0           # 完全没有 mids 的连续页计数
+        no_new_seq = 0          # 有 mids 但全部已见 的连续页计数
+        batch: List[str] = []
         tpl = (
             "https://s.weibo.com/weibo?q={}&typeall=1&suball=1"
             "&timescope=custom:{}:{}&Refer=g&page={}"
         )
+        max_pages = 50          # 上限防止死循环
+        max_retries = 3
     
-        while page <= 50:                 # 上限 50 页
+        while page <= max_pages:
             url = tpl.format(quote_plus(kw), ts_s, ts_e, page)
-            resp = await client.get(url)
-            mids = re.findall(r'\bmid="(\d{8,})"', html.unescape(resp.text))
     
-            utils.logger.info(
-                f"[WeiboCrawler] {ts_s} → {ts_e} | page {page} | mids {len(mids)}"
-            )
+            # 简单重试 + 指数退避
+            retry = 0
+            resp = None
+            while retry < max_retries:
+                try:
+                    resp = await client.get(url)
+                    break
+                except Exception as e:
+                    wait = (2 ** retry) + random.random() * 0.5
+                    utils.logger.warning(f"[WeiboCrawler] request error page {page}, retry {retry}, wait {wait}s, err: {e}")
+                    await asyncio.sleep(wait)
+                    retry += 1
+            if resp is None:
+                utils.logger.error(f"[WeiboCrawler] failed to get page {page} after {max_retries} retries, stop this timescope")
+                break
     
-            if not mids:                   # 空页
-                empty_seq += 1
-                if empty_seq >= 2:
-                    break                 # 连续两页空 → 结束窗口
+            if resp.status_code != 200:
+                utils.logger.warning(f"[WeiboCrawler] page {page} returned status {resp.status_code}")
+                # 若返回非 200，做一次短暂等待再继续（避免被临时限流立刻终止）
+                await asyncio.sleep(2 + random.random())
                 page += 1
                 continue
-            else:
-                empty_seq = 0              # 重置空页计数
     
+            html_text = html.unescape(resp.text)
+    
+            # 解析实际页数（仅在第一页或尚未确定时）
+            if page == 1:
+                try:
+                    parsed_cnt = self._get_page_cnt(html_text)
+                    if parsed_cnt:
+                        max_pages = min(parsed_cnt, 50)
+                    utils.logger.info(f"[WeiboCrawler] detected max_pages={max_pages} for timescope {ts_s}→{ts_e}")
+                except Exception as e:
+                    utils.logger.debug(f"[WeiboCrawler] parse page count failed: {e}")
+    
+            # 提取 mids（保留原有正则作为主方法）
+            mids = re.findall(r'\bmid="(\d{8,})"', html_text) or []
+            utils.logger.info(f"[WeiboCrawler] {ts_s} → {ts_e} | page {page} | mids {len(mids)}")
+    
+            if not mids:
+                empty_seq += 1
+                no_new_seq = 0
+                if empty_seq >= 2:
+                    utils.logger.info(f"[WeiboCrawler] 连续 {empty_seq} 页无 mids，结束 timescope")
+                    break
+                page += 1
+                await asyncio.sleep(self.page_delay + random.random() * 0.5)
+                continue
+            else:
+                empty_seq = 0
+    
+            # 筛出真正“新”的 mids，避免重复抓取详情
+            new_mids = []
             for mid in mids:
-                if mid in self._seen_mid_set:
-                    continue
-                self._seen_mid_set.add(mid)
+                if mid not in self._seen_mid_set:
+                    self._seen_mid_set.add(mid)
+                    new_mids.append(mid)
+    
+            if not new_mids:
+                # 本页有 mids，但全部是已见（重复内容）
+                no_new_seq += 1
+                utils.logger.info(f"[WeiboCrawler] page {page} has {len(mids)} mids but 0 new mids (no_new_seq={no_new_seq})")
+                if no_new_seq >= 3:
+                    utils.logger.info("[WeiboCrawler] 连续 3 页无新 mid，认为已翻到底，结束 timescope")
+                    break
+                page += 1
+                await asyncio.sleep(self.page_delay + random.random() * 0.5)
+                continue
+            else:
+                no_new_seq = 0
+    
+            # 只对 new_mids 请求详情（节省请求）
+            for mid in new_mids:
                 try:
                     detail = await self.wb_client.get_note_info_by_id(mid)
                 except DataFetchError as e:
                     utils.logger.warning(f"mid {mid} failed: {e}")
                     continue
-    
                 if detail and detail.get("mblog"):
                     mblog = detail["mblog"]
                     await weibo_store.update_weibo_note(detail)
                     await self.get_note_images(mblog)
                     batch.append(mid)
     
-            page += 1                      # 翻到下一页
-            await asyncio.sleep(self.page_delay)
-        await self.batch_get_notes_comments(batch)
+            # 如果到达解析出来的最大页数，也可以提前结束
+            if page >= max_pages:
+                utils.logger.info(f"[WeiboCrawler] reach max_pages({max_pages}), stop timescope")
+                break
+    
+            page += 1
+            await asyncio.sleep(self.page_delay + random.random() * 0.5)
+    
+        # 批量抓取评论
+        if batch:
+            await self.batch_get_notes_comments(batch)
+
 
     @staticmethod
     def _get_page_cnt(html_text: str) -> int:
