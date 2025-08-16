@@ -6,7 +6,7 @@
 # 5. 不得用于任何非法或不当的用途。
 #
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
-# 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
+# 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款.
 
 
 # -*- coding: utf-8 -*-
@@ -22,7 +22,7 @@ import random
 import re
 from asyncio import Task
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import quote_plus
 
 import httpx
@@ -78,6 +78,79 @@ class WeiboCrawler(AbstractCrawler):
         self.page_delay  = getattr(config, "PAGE_DELAY", "")
         self.comment_delay  = getattr(config, "COMMENT_DELAY", "")
 
+    # ---------------- 延迟/退避工具 ----------------
+    @staticmethod
+    def _parse_delay_spec(spec: Union[str, float, int, Tuple[float, float], None]) -> Tuple[float, float]:
+        """
+        将各种 user-friendly 的 delay 配置解析为 (min_delay, max_delay)。
+        支持:
+          - None -> (0.5, 1.0)
+          - 单个数字 -> (n, n)
+          - 字符串 "1-3" 或 "1:3" -> (1.0, 3.0)
+          - tuple/list -> (min, max)
+        """
+        if spec is None or spec == "":
+            return (0.5, 1.0)
+        if isinstance(spec, (int, float)):
+            return (float(spec), float(spec))
+        if isinstance(spec, (tuple, list)) and len(spec) == 2:
+            return (float(spec[0]), float(spec[1]))
+        if isinstance(spec, str):
+            s = spec.strip()
+            if "-" in s:
+                a, b = s.split("-", 1)
+            elif ":" in s:
+                a, b = s.split(":", 1)
+            else:
+                try:
+                    v = float(s)
+                    return (v, v)
+                except Exception:
+                    return (0.5, 1.0)
+            try:
+                return (float(a), float(b))
+            except Exception:
+                return (0.5, 1.0)
+        # fallback
+        return (0.5, 1.0)
+
+    def _rand_delay(self, base: Optional[Union[str, float, Tuple[float, float]]] = None, jitter: float = 0.3) -> float:
+        """
+        返回随机延迟秒数。
+        - base: 同上 _parse_delay_spec 支持的类型（None、单值、"min-max"、tuple）
+        - jitter: 在随机抽样的基础上再加上 0..jitter 的抖动（秒）
+        """
+        mn, mx = self._parse_delay_spec(base)
+        if mx < mn:
+            mn, mx = mx, mn
+        delay = random.uniform(mn, mx)
+        if jitter and jitter > 0:
+            delay += random.random() * float(jitter)
+        return delay
+
+    async def sleep_rand(self, base: Optional[Union[str, float, Tuple[float, float]]] = None, jitter: float = 0.3):
+        """
+        异步 sleep 的便捷方法（推荐在代码中统一使用）
+        调用示例: await self.sleep_rand(self.page_delay)
+        """
+        d = self._rand_delay(base or getattr(self, "page_delay", None), jitter=jitter)
+        utils.logger.debug(f"[WeiboCrawler] sleeping {d:.2f}s (base={base}, jitter={jitter})")
+        await asyncio.sleep(d)
+
+    async def backoff_sleep(self, attempt: int, base: float = 1.0, cap: float = 60.0, jitter: float = 1.0):
+        """
+        指数退避睡眠
+          - attempt: 第几次重试（0 表示第一次失败）
+          - base: 基础延迟（秒）
+          - cap: 最大延迟上限
+          - jitter: 抖动范围（会在 0..jitter 内随机加成）
+        例: await self.backoff_sleep(retry_count, base=1, cap=30, jitter=1.5)
+        """
+        delay = min(cap, base * (2 ** attempt))
+        delay = delay + random.random() * float(jitter)
+        utils.logger.debug(f"[WeiboCrawler] backoff sleep {delay:.2f}s (attempt={attempt})")
+        await asyncio.sleep(delay)
+
     # =======================================================
     #  启动
     # =======================================================
@@ -120,7 +193,8 @@ class WeiboCrawler(AbstractCrawler):
                 )
                 await login_m.begin()
                 await self.context_page.goto(self.mobile_index_url)
-                await asyncio.sleep(2)
+                # 随机等待，避免固定 sleep
+                await self.sleep_rand((1, 2))
                 await self.wb_client.update_cookies(self.browser_context)
 
             # ---------- 如 timerange 模式需登录桌面端 ----------
@@ -235,7 +309,8 @@ class WeiboCrawler(AbstractCrawler):
                     await weibo_store.update_weibo_note(card)
                     await self.get_note_images(mblog)
             page += 1
-            await asyncio.sleep(self.page_delay)
+            # 随机延迟，替代固定 sleep
+            await self.sleep_rand(self.page_delay)
             await self.batch_get_notes_comments(ids)
 
     # ---------------- timerange ----------------
@@ -300,9 +375,9 @@ class WeiboCrawler(AbstractCrawler):
                     resp = await client.get(url)
                     break
                 except Exception as e:
-                    wait = (2 ** retry) + random.random() * 0.5
-                    utils.logger.warning(f"[WeiboCrawler] request error page {page}, retry {retry}, wait {wait}s, err: {e}")
-                    await asyncio.sleep(wait)
+                    # 使用 backoff_sleep 替代固定等待
+                    utils.logger.warning(f"[WeiboCrawler] request error page {page}, retry {retry}, err: {e}")
+                    await self.backoff_sleep(retry, base=1, cap=30, jitter=0.5)
                     retry += 1
             if resp is None:
                 utils.logger.error(f"[WeiboCrawler] failed to get page {page} after {max_retries} retries, stop this timescope")
@@ -310,8 +385,8 @@ class WeiboCrawler(AbstractCrawler):
     
             if resp.status_code != 200:
                 utils.logger.warning(f"[WeiboCrawler] page {page} returned status {resp.status_code}")
-                # 若返回非 200，做一次短暂等待再继续（避免被临时限流立刻终止）
-                await asyncio.sleep(2 + random.random())
+                # 若返回非 200，做一次短暂随机等待再继续（避免被临时限流立刻终止）
+                await self.sleep_rand((2, 3))
                 page += 1
                 continue
     
@@ -338,7 +413,7 @@ class WeiboCrawler(AbstractCrawler):
                     utils.logger.info(f"[WeiboCrawler] 连续 {empty_seq} 页无 mids，结束 timescope")
                     break
                 page += 1
-                await asyncio.sleep(self.page_delay + random.random() * 0.5)
+                await self.sleep_rand(self.page_delay, jitter=0.5)
                 continue
             else:
                 empty_seq = 0
@@ -358,7 +433,7 @@ class WeiboCrawler(AbstractCrawler):
                     utils.logger.info("[WeiboCrawler] 连续 3 页无新 mid，认为已翻到底，结束 timescope")
                     break
                 page += 1
-                await asyncio.sleep(self.page_delay + random.random() * 0.5)
+                await self.sleep_rand(self.page_delay, jitter=0.5)
                 continue
             else:
                 no_new_seq = 0
@@ -382,7 +457,7 @@ class WeiboCrawler(AbstractCrawler):
                 break
     
             page += 1
-            await asyncio.sleep(self.page_delay + random.random() * 0.5)
+            await self.sleep_rand(self.page_delay, jitter=0.5)
     
         # 批量抓取评论
         if batch:
